@@ -56,6 +56,7 @@ import com.amazonaws.connectors.athena.jdbc.connection.RdsSecretsCredentialProvi
 import com.amazonaws.services.athena.AmazonAthena;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.secretsmanager.AWSSecretsManager;
+import com.mysql.jdbc.exceptions.jdbc4.MySQLDataException;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.holders.NullableBigIntHolder;
 import org.apache.arrow.vector.holders.NullableBitHolder;
@@ -223,7 +224,12 @@ public abstract class JdbcRecordHandler
             case SMALLINT:
                 return (SmallIntExtractor) (Object context, NullableSmallIntHolder dst) ->
                 {
-                    dst.value = resultSet.getShort(fieldName);
+                    try {
+                        dst.value = resultSet.getShort(fieldName);
+                    }
+                    catch (MySQLDataException e) {
+                        dst.value = -1;
+                    }
                     dst.isSet = resultSet.wasNull() ? 0 : 1;
                 };
             case INT:

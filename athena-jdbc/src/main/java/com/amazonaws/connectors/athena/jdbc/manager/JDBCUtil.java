@@ -88,10 +88,6 @@ public final class JDBCUtil
             }
         }
 
-        if (!defaultPresent) {
-            throw new RuntimeException("Must provide connection parameters for default database instance " + DatabaseConnectionConfigBuilder.DEFAULT_CONNECTION_STRING_PROPERTY);
-        }
-
         return metadataHandlerMap.build();
     }
 
@@ -135,10 +131,6 @@ public final class JDBCUtil
                 recordHandlerMap.put(DEFAULT_CATALOG_PREFIX + functionName, jdbcRecordHandler);
                 defaultPresent = true;
             }
-        }
-
-        if (!defaultPresent) {
-            throw new RuntimeException("Must provide connection parameters for default database instance " + DatabaseConnectionConfigBuilder.DEFAULT_CONNECTION_STRING_PROPERTY);
         }
 
         return recordHandlerMap.build();

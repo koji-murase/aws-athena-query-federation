@@ -47,7 +47,7 @@ public class GenericJdbcConnectionFactory
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(GenericJdbcConnectionFactory.class);
 
-    private static final String MYSQL_DRIVER_CLASS = "com.mysql.cj.jdbc.Driver";
+    private static final String MYSQL_DRIVER_CLASS = "com.mysql.jdbc.Driver";
     private static final int MYSQL_DEFAULT_PORT = 3306;
 
     private static final String POSTGRESQL_DRIVER_CLASS = "org.postgresql.Driver";

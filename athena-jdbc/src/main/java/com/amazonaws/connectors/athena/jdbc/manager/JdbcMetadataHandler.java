@@ -45,9 +45,9 @@ import com.amazonaws.connectors.athena.jdbc.splits.SplitterFactory;
 import com.amazonaws.services.athena.AmazonAthena;
 import com.amazonaws.services.secretsmanager.AWSSecretsManager;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -63,6 +63,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -138,10 +139,10 @@ public abstract class JdbcMetadataHandler
     private Set<String> listDatabaseNames(final Connection jdbcConnection)
             throws SQLException
     {
-        try (ResultSet resultSet = jdbcConnection.getMetaData().getSchemas()) {
+        try (ResultSet resultSet = jdbcConnection.getMetaData().getCatalogs()) {
             ImmutableSet.Builder<String> schemaNames = ImmutableSet.builder();
             while (resultSet.next()) {
-                String schemaName = resultSet.getString("TABLE_SCHEM");
+                String schemaName = resultSet.getString("TABLE_CAT");
                 // skip internal schemas
                 if (!schemaName.equals("information_schema")) {
                     schemaNames.add(schemaName);
@@ -170,7 +171,8 @@ public abstract class JdbcMetadataHandler
         try (ResultSet resultSet = getTables(jdbcConnection, databaseName)) {
             ImmutableList.Builder<TableName> list = ImmutableList.builder();
             while (resultSet.next()) {
-                list.add(getSchemaTableName(resultSet));
+                TableName tableName = getSchemaTableName(resultSet);
+                list.add(tableName);
             }
             return list.build();
         }
@@ -182,8 +184,9 @@ public abstract class JdbcMetadataHandler
         DatabaseMetaData metadata = connection.getMetaData();
         String escape = metadata.getSearchStringEscape();
         return metadata.getTables(
-                connection.getCatalog(),
                 escapeNamePattern(schemaName, escape),
+                null,
+//              connection.getCatalog(),
                 null,
                 new String[] {"TABLE", "VIEW"});
     }
@@ -192,12 +195,14 @@ public abstract class JdbcMetadataHandler
             throws SQLException
     {
         return new TableName(
-                resultSet.getString("TABLE_SCHEM"),
+                resultSet.getString("TABLE_CAT"),
                 resultSet.getString("TABLE_NAME"));
     }
 
     protected String escapeNamePattern(final String name, final String escape)
     {
+        return name;
+/*
         if ((name == null) || (escape == null)) {
             return name;
         }
@@ -207,6 +212,8 @@ public abstract class JdbcMetadataHandler
         escapedName = escapedName.replace("_", escape + "_");
         escapedName = escapedName.replace("%", escape + "%");
         return escapedName;
+
+ */
     }
 
     @Override
@@ -214,7 +221,7 @@ public abstract class JdbcMetadataHandler
     {
         try (Connection connection = jdbcConnectionFactory.getConnection(getCredentialProvider())) {
             Schema partitionSchema = getPartitionSchema(getTableRequest.getCatalogName());
-            return new GetTableResponse(getTableRequest.getCatalogName(), getTableRequest.getTableName(), getSchema(connection, getTableRequest.getTableName(), partitionSchema),
+            return new GetTableResponse(getTableRequest.getCatalogName(), getTableRequest.getTableName(), selectSchema(connection, getTableRequest.getTableName(), partitionSchema),
                     partitionSchema.getFields().stream().map(Field::getName).collect(Collectors.toSet()));
         }
         catch (SQLException sqlException) {
@@ -222,58 +229,76 @@ public abstract class JdbcMetadataHandler
         }
     }
 
-    private Schema getSchema(Connection jdbcConnection, TableName tableName, Schema partitionSchema)
-            throws SQLException
+    private SchemaBuilder getSchema(ResultSet resultSet) throws SQLException
     {
         SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
-
-        try (ResultSet resultSet = getColumns(jdbcConnection.getCatalog(), tableName, jdbcConnection.getMetaData())) {
-            boolean found = false;
-            while (resultSet.next()) {
-                ArrowType columnType = JdbcArrowTypeConverter.toArrowType(
-                        resultSet.getInt("DATA_TYPE"),
-                        resultSet.getInt("COLUMN_SIZE"),
-                        resultSet.getInt("DECIMAL_DIGITS"));
-                String columnName = resultSet.getString("COLUMN_NAME");
-                if (columnType != null && SupportedTypes.isSupported(columnType)) {
-                    if (columnType instanceof ArrowType.List) {
-                        schemaBuilder.addListField(columnName, getArrayArrowTypeFromTypeName(
-                                resultSet.getString("TYPE_NAME"),
-                                resultSet.getInt("COLUMN_SIZE"),
-                                resultSet.getInt("DECIMAL_DIGITS")));
-                    }
-                    else {
-                        schemaBuilder.addField(FieldBuilder.newBuilder(columnName, columnType).build());
-                    }
+        boolean found = false;
+        while (resultSet.next()) {
+            ArrowType columnType = JdbcArrowTypeConverter.toArrowType(
+                    resultSet.getInt("DATA_TYPE"),
+                    resultSet.getInt("COLUMN_SIZE"),
+                    resultSet.getInt("DECIMAL_DIGITS"));
+            String columnName = resultSet.getString("COLUMN_NAME");
+            if (columnType != null && SupportedTypes.isSupported(columnType)) {
+                if (columnType instanceof ArrowType.List) {
+                    schemaBuilder.addListField(columnName, getArrayArrowTypeFromTypeName(
+                            resultSet.getString("TYPE_NAME"),
+                            resultSet.getInt("COLUMN_SIZE"),
+                            resultSet.getInt("DECIMAL_DIGITS")));
                 }
                 else {
-                    // Default to VARCHAR ArrowType
-                    LOGGER.warn("getSchema: Unable to map type for column[" + columnName +
-                            "] to a supported type, attempted " + columnType + " - defaulting type to VARCHAR.");
-                    schemaBuilder.addField(FieldBuilder.newBuilder(columnName, new ArrowType.Utf8()).build());
+                    schemaBuilder.addField(FieldBuilder.newBuilder(columnName, columnType).build());
                 }
-                found = true;
             }
-
-            if (!found) {
-                throw new RuntimeException("Could not find table in " + tableName.getSchemaName());
+            else {
+                // Default to VARCHAR ArrowType
+                LOGGER.warn("getSchema: Unable to map type for column[" + columnName +
+                        "] to a supported type, attempted " + columnType + " - defaulting type to VARCHAR.");
+                schemaBuilder.addField(FieldBuilder.newBuilder(columnName, new ArrowType.Utf8()).build());
             }
-
-            // add partition columns
-            partitionSchema.getFields().forEach(schemaBuilder::addField);
-
-            return schemaBuilder.build();
+            found = true;
         }
+        return found ? schemaBuilder : null;
     }
 
-    private ResultSet getColumns(final String catalogName, final TableName tableHandle, final DatabaseMetaData metadata)
+    private Schema selectSchema(Connection jdbcConnection, TableName tableName, Schema partitionSchema)
+            throws SQLException
+    {
+        List<List<String>> tryGetColumns = Lists.newArrayList(
+                Lists.newArrayList(tableName.getSchemaName(), tableName.getTableName(), "low", "low"),
+                Lists.newArrayList(tableName.getSchemaName(), tableName.getTableName().toUpperCase(Locale.ROOT), "low", "up"),
+                Lists.newArrayList(tableName.getSchemaName().toUpperCase(Locale.ROOT), tableName.getTableName().toUpperCase(Locale.ROOT), "up", "up"),
+                Lists.newArrayList(tableName.getSchemaName().toUpperCase(Locale.ROOT), tableName.getTableName(), "up", "low")
+        );
+        SchemaBuilder schemaBuilder = null;
+        for (List<String> trial : tryGetColumns) {
+            schemaBuilder = getSchema(getColumns(trial.get(0), trial.get(1), jdbcConnection.getMetaData()));
+            if (schemaBuilder != null) {
+                if ("up".equals(trial.get(2))) {
+                    tableName.schemaNameAsUpperCase();
+                }
+                if ("up".equals(trial.get(3))) {
+                    tableName.tableNameAsUpperCase();
+                }
+                break;
+            }
+        }
+        if (schemaBuilder == null) {
+            throw new RuntimeException("Could not find table in " + tableName.getSchemaName());
+        }
+        // add partition columns
+        partitionSchema.getFields().forEach(schemaBuilder::addField);
+        return schemaBuilder.build();
+    }
+
+    private ResultSet getColumns(final String schemaName, final String tableName, final DatabaseMetaData metadata)
             throws SQLException
     {
         String escape = metadata.getSearchStringEscape();
-        return metadata.getColumns(
-                catalogName,
-                escapeNamePattern(tableHandle.getSchemaName(), escape),
-                escapeNamePattern(tableHandle.getTableName(), escape),
+        return  metadata.getColumns(
+                escapeNamePattern(schemaName, escape),
+                null,
+                escapeNamePattern(tableName, escape),
                 null);
     }
 

@@ -62,7 +62,9 @@ import java.util.Set;
 public class MySqlMetadataHandler
         extends JdbcMetadataHandler
 {
-    static final Map<String, String> JDBC_PROPERTIES = ImmutableMap.of("databaseTerm", "SCHEMA");
+    static final Map<String, String> JDBC_PROPERTIES = ImmutableMap.of(
+            "databaseTerm", "CATALOG", "jdbcCompliantTruncationForReads", "false"
+    );
     static final String GET_PARTITIONS_QUERY = "SELECT DISTINCT partition_name FROM INFORMATION_SCHEMA.PARTITIONS WHERE TABLE_NAME = ? AND TABLE_SCHEMA = ? " +
             "AND partition_name IS NOT NULL";
     static final String BLOCK_PARTITION_COLUMN_NAME = "partition_name";

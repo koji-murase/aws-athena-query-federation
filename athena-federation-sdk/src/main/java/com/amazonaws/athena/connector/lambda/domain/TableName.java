@@ -25,6 +25,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 
+import java.util.Locale;
+
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -36,6 +38,9 @@ public class TableName
     private final String schemaName;
     //The name of the table.
     private final String tableName;
+
+    private boolean isSchemaNameUpperCase = false;
+    private boolean isTableNameUpperCase = false;
 
     /**
      * Constructs a fully qualified TableName.
@@ -59,7 +64,12 @@ public class TableName
     @JsonProperty
     public String getSchemaName()
     {
-        return schemaName;
+        if (isSchemaNameUpperCase) {
+            return schemaName.toUpperCase(Locale.ROOT);
+        }
+        else {
+            return schemaName;
+        }
     }
 
     /**
@@ -70,7 +80,21 @@ public class TableName
     @JsonProperty
     public String getTableName()
     {
-        return tableName;
+        if (isTableNameUpperCase) {
+            return tableName.toUpperCase(Locale.ROOT);
+        }
+        else {
+            return tableName;
+        }
+    }
+
+    public void tableNameAsUpperCase()
+    {
+        isTableNameUpperCase = true;
+    }
+    public void schemaNameAsUpperCase()
+    {
+        isSchemaNameUpperCase = true;
     }
 
     @Override
