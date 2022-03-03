@@ -1,3 +1,6 @@
+This repository is fork for my need of MySQL 5.x capabilities.
+Basically it is recommended to use the original.
+
 # Amazon Athena Query Federation
 
 [![Build Status](https://github.com/awslabs/aws-athena-query-federation/workflows/Java%20CI%20Push/badge.svg)](https://github.com/awslabs/aws-athena-query-federation/actions)
